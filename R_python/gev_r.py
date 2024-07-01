@@ -300,7 +300,7 @@ def xarray_gev_python(
 
 def xarray_gev(
         data_array: xarray.DataArray,
-        cov: typing.Optional[typing.List[xarray.DataArray]] = None,
+        cov: typing.Optional[typing.List[xarray.DataArray]|xarray.DataArray] = None,
         shape_cov=False,
         dim: [typing.List[str], str] = 'time_ensemble',
         file=None, recreate_fit: bool = False,
@@ -342,18 +342,23 @@ def xarray_gev(
 
     if cov is None:
         cov = []
+    if not isinstance(cov, list):
+        cov = [cov]
 
     cov_names = [c.name for c in cov]
 
     ncov = len(cov)
-    input_core_dims = [[dim]] * (1 + ncov)
-    #output_core_dims = [['parameter']] * 2 + [['parameter', 'parameter2'], ['NegLog'], ['AIC'],['KS']]
+    if isinstance(dim, str):
+        dim = [dim]
+    input_core_dims = [dim] * (1 + ncov)
+
     output_core_dims = [['parameter']] * 2 + [['parameter', 'parameter2'], [], [], []]
-    gev_args = [data_array] + cov
+    gev_args = [data_array] + [c.broadcast_like(data_array) for c in cov] # broadcast covariates to data_array
     if weights is not None:
         gev_args += [weights]
-        input_core_dims += [[dim]]
+        input_core_dims += [dim]
         kwargs.update(use_weights=True)
+
 
     params, std_err, cov_param, nll, AIC, ks = xarray.apply_ufunc(gev_fit, *gev_args,
                                                                   input_core_dims=input_core_dims,
