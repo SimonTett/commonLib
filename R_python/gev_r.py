@@ -1,15 +1,14 @@
 """
 SW to gev fit with R in python.
 """
-import numpy
-import xarray
-import scipy.stats
-import pandas as pd
-import os
-import numpy as np
-import typing
 import logging
 import pathlib
+import typing
+
+import numpy as np
+import pandas as pd
+import scipy.stats
+import xarray
 
 my_logger = logging.getLogger(__name__)
 use_weights_warn = True
@@ -138,7 +137,7 @@ def gev_fit(
     # check we have enough data.
     sumOK = L.sum()
     if sumOK < minValues:
-        my_logger.warning(f'Not enough data for fit. Have {sumOK} need {minValues}')
+        my_logger.debug(f'Not enough data for fit. Have {sumOK} need {minValues}')
         return (params, se, cov_params, nllh, aic, ks)
 
     df_data = [x[L]]  # remove nan from data]
@@ -258,6 +257,7 @@ def xarray_gev_python(
         dim: str = 'time_ensemble',
         file: typing.Optional[pathlib.Path] = None,
         recreate_fit: bool = False,
+        use_dask:bool = False,
         **kwargs
         ) -> xarray.Dataset:
     """
@@ -267,6 +267,7 @@ def xarray_gev_python(
     :param dim: The dimension over which to collapse.
     :param file -- If defined save fit to this file. If file exists then read data from it and so do not actually do fit.
     :param recreate_fit -- If True even if file exists compute fit.
+    :oaram use_dask: If True use dask to parallelize the computation.
     :param kwargs: any kwargs passed through to the fitting function
     :return: a dataset containing:
         Parameters -- the parameters of the fit; location, scale, shape
@@ -279,11 +280,18 @@ def xarray_gev_python(
         return fit
 
     my_logger.debug('Doing fit')
+
+    if use_dask:
+        extra_args=dict(dask='parallelized',
+                        dask_gufunc_kwargs=dict(allow_rechunk=True),
+                        output_sizes=dict(parameter=3, ks=2))
+    else:
+        extra_args = {}
     params, ks_result = xarray.apply_ufunc(
         gev_fit_python, ds,
         input_core_dims=[[dim]],
         output_core_dims=[['parameter'], ['ks']],
-        vectorize=True, kwargs=kwargs
+        vectorize=True, kwargs=kwargs,**extra_args
     )
     my_logger.debug('Done fit. Making dataset')
     pnames = ['shape', 'location', 'scale']
@@ -308,6 +316,7 @@ def xarray_gev(
         name: typing.Optional[str] = None,
         weights: typing.Optional[xarray.DataArray] = None,
         extra_attrs:typing.Optional[dict] = None,
+        use_dask:bool = False,
         **kwargs
 ):
     #
@@ -323,6 +332,7 @@ def xarray_gev(
     :param recreate_fit -- if True even if file exists compute fit.
     :param verbose -- be verbose if True
     :param name: Name of the fit. Stored in result attributes under name.
+    :param use_dask: If True use dask to do the fitting.
     :param kwargs: any kwargs passed through to the fitting function
     :return: a dataset containing:
         Parameters -- the parameters of the fit; location, location wrt cov, scale, scale wrt cov, shape, shape wrt cov
@@ -334,8 +344,7 @@ def xarray_gev(
     if (file is not None) and file.exists() and (
             not recreate_fit):  # got a file specified, it exists and we are not recreating fit
         data_array = xarray.load_dataset(file)  # just load the dataset and return it
-        if verbose:
-            print(f"Loaded existing data from {file}")
+        my_logger.info(f"Loaded existing data from {file}")
         return data_array
 
     kwargs['shapeCov'] = shape_cov
@@ -353,18 +362,29 @@ def xarray_gev(
     input_core_dims = [dim] * (1 + ncov)
 
     output_core_dims = [['parameter']] * 2 + [['parameter', 'parameter2'], [], [], []]
+    my_logger.debug('Seetting up GEV args')
     gev_args = [data_array] + [c.broadcast_like(data_array) for c in cov] # broadcast covariates to data_array
+    if use_dask:
+        extra_args=dict(dask='parallelized',
+                        dask_gufunc_kwargs=dict(allow_rechunk=True,
+                        output_sizes=dict(parameter=3+2*ncov, parameter2=3+2*ncov)))
+        my_logger.debug('Using dask')
+    else:
+        extra_args = {}
     if weights is not None:
         gev_args += [weights]
         input_core_dims += [dim]
         kwargs.update(use_weights=True)
+        my_logger.debug('Using weights')
 
+    my_logger.debug('Doing fit')
 
     params, std_err, cov_param, nll, AIC, ks = xarray.apply_ufunc(gev_fit, *gev_args,
                                                                   input_core_dims=input_core_dims,
                                                                   output_core_dims=output_core_dims,
-                                                                  vectorize=True, kwargs=kwargs
+                                                                  vectorize=True, kwargs=kwargs,**extra_args
                                                                   )
+    my_logger.debug('Done fit. Making dataset')
     pnames = []
     for n in ['location', 'scale', 'shape']:
         pnames += [n]
@@ -385,6 +405,13 @@ def xarray_gev(
                                 ).assign_coords(
         parameter=pnames, parameter2=pnames
     )
+    if use_dask:
+        my_logger.debug('Computing for dask')
+        logger = logging.getLogger('distributed.utils_perf')
+        logger.setLevel('ERROR')
+        data_array = data_array.compute()
+        my_logger.debug('Done dask GEV computation')
+
     if name:
         data_array.attrs.update(name=name)
     if extra_attrs:
@@ -392,8 +419,7 @@ def xarray_gev(
     if file is not None:
         file.parent.mkdir(exist_ok=True, parents=True)  # make directory
         data_array.to_netcdf(file)  # save the dataset.
-        if verbose:
-            print(f"Wrote fit information to {file}")
+        my_logger.info(f"Wrote fit information to {file}")
     return data_array
 
 
@@ -406,7 +432,7 @@ def fn_isf(c, loc, scale, p: typing.Optional[np.ndarray] = None, dist=scipy.stat
     # if len(p) == 1:
     #    p=p.reshape(1,-1)
 
-    # breakpoint()
+
     x = fd.isf(np.broadcast_to(p, shape))
     # x=fd.isf(p)
     # x = fdist.isf(p)  # values for 1-cdf.
