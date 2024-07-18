@@ -126,9 +126,11 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
 
 
 def saveFig(
-        fig, name: typing.Optional[str] = None,
+        fig,
+        name: typing.Optional[str] = None,
         savedir: typing.Optional[pathlib.Path] = None,
-        figtype: typing.Union[str, typing.List[str]] = 'png', dpi: int = 300
+        figtype: typing.Union[str, typing.List[str]] = 'png', dpi: int = 300,
+        transpose: bool = False
 ):
     """
 
@@ -137,15 +139,21 @@ def saveFig(
     :param savedir (optional) directory as a pathlib. Path to save figure to. Default is figures
     :param figtype graphics type to save as. If list then types to save as
     :param dpi: resolution to save at.    else:
-        fig_name = name
+    :param transpose: If True then generate a transposed version of the figure before saving.
+    Transposition will be reversed at end.
+        This allows figures created for papers to go to landscape.
+        If no name provided name will be fig.get_label+'_transpose'
     """
-
+    if transpose:
+        fig.set_size_inches(fig.get_size_inches()[::-1]) # transpose the figure #
     if dpi is None:
         dpi = 300
     # set up defaults
     # work out sub_plot_name.
     if name is None:
         name = fig.get_label()
+        if transpose:
+            name += '_transpose'
     if savedir is None:
         savedir = pathlib.Path('figures')  # always relative to where we are
     # possibly create the savedir.
@@ -154,8 +162,11 @@ def saveFig(
         figtype = [figtype]
     for ftype in figtype:  # loop over fig types
         out_file_name = savedir / (name + "." + ftype)
-        fig.savefig(out_file_name, dpi=dpi)
+        fig.savefig(out_file_name, dpi=dpi,bbox_inches='tight')
         my_logger.debug(f"Saved figure to {out_file_name} at {dpi} dpi")
+    # and undo transpose
+    if transpose:
+        fig.set_size_inches(fig.get_size_inches()[::-1])
 
 
 class plotLabel:
