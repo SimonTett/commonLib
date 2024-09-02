@@ -27,12 +27,12 @@ class test_R_gev(unittest.TestCase):
         # test with covariates. Will increase the mean with time
         time  = np.arange(0,len(data))/100.
         data2 = stats.genextreme.rvs(0.1, loc=10, scale=5, size=10000) *(1+time*0.1) # expect to get a change in location and scale
-        expected = pd.Series([0.1, 10, 5,1,0.5],index=['shape','location','scale','d_location_1','d_scale_1']).rename('par')
+        expected = pd.Series([0.1, 10, 5,1,0.5],index=['shape','location','scale','Dlocation_cov1','Dscale_cov1']).rename('par')
         pars3,se3,cov3,nll3,aic3,ks3 = gev_r.gev_fit_new([data2,time], verbose=True,initial=dict(location=[15,0.9],scale=[6.0,0.4],shape=0.01))
         pd_tests.assert_series_equal(pars3.round(1), expected, rtol=1e-1, check_like=True)
 
     def test_gev_xarray(self):
-        # test case with xarray. Will have a two dimensional array with time and space
+        # test case with xarray. Will have a two-dimensional array with time and space
         time = np.arange(0,10000)/100.
         space = np.arange(0,2)
         data = np.stack([stats.genextreme.rvs(0.5, loc=10*(s+1), scale=5, size=10000) * (1 + time * 0.1) for s in space],axis=1)

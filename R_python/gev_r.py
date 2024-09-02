@@ -20,6 +20,7 @@ from rpy2.robjects import numpy2ri
 import re
 import importlib.resources
 import scipy.stats
+
 utils = rpackages.importr('utils')
 utils.chooseCRANmirror(ind=1)
 # R package names
@@ -27,7 +28,7 @@ packnames = (['extRemes'])  # list of packages to install.
 # From example rpy2 install what needs to be installed.
 names_to_install = [x for x in packnames if not rpackages.isinstalled(x)]
 if len(names_to_install) > 0:
-    my_logger.info(f"installing "+" ".join(names_to_install))
+    my_logger.info(f"installing " + " ".join(names_to_install))
     utils.install_packages(robjects.vectors.StrVector(names_to_install))
 for package in packnames:
     rpackages.importr(package)  # so available
@@ -234,12 +235,14 @@ def gev_fit(
 
     return (params, se, cov_params, nllh, aic, ks)  # return the data.
 
-def gev_fit_new(data_arrays: list[np.ndarray],
+
+def gev_fit_new(data_arrays: typing.Union[tuple[np.ndarray], list[np.ndarray]],
                 shape_cov: bool = False,
                 min_values: int = 20,
                 verbose: bool = False,
                 weights: bool = False,
-                initial: typing.Optional[dict[str, typing.Union[float,int,np.ndarray,list]]] = None,
+                initial: typing.Optional[dict[str, typing.Union[float, int, np.ndarray, list]]] = None,
+                cov_names: typing.Optional[typing.List[str]] = None,
                 **kwargs) -> tuple[pd.Series, pd.Series, pd.DataFrame, float, float, float]:
     """
         Do GEV fit using R and return values.
@@ -253,9 +256,11 @@ def gev_fit_new(data_arrays: list[np.ndarray],
         :param weights : If True use weights in the fit. This then interprets the last array in data_arrays as weights.
         :param initial : Initial values for the fit. Should contain initial values for fevd.
                 Contains location , scale,shape -- see doc for extRemes::fevd
-
                 Will negate any shape values as R and python conventions differ.
-        :param shapeCov -- If True allow the shape to vary with the co-variate.
+        :param cov_names : Names of the parameters. If None then names will 1,2,3 etc.
+        parameter cov_names for covariates. Parameters will be called Dlocation_covname, Dscale_covname, Dshape_covname etc
+          If not provided then cov_names will be cov1, cov2 etc.
+        :param shape_cov -- If True allow the shape to vary with the co-variate.
         :return: the parameter values -- as a pandas series,
                  the std error -- as a pandas series,
                  the covariance matrix -- as a pandas data frame,
@@ -264,18 +269,19 @@ def gev_fit_new(data_arrays: list[np.ndarray],
                     the ks test p value as a float
         """
 
-    def fail_result():
+    def fail_result(cov_names: list[str], shape_cov: bool = False) -> dict:
         """
         Generate a failure result
         :return: dict of results all with nan values
         """
         result = {name: np.nan if shp == (1,) else np.broadcast_to(np.nan, shp) for name, shp in shapes.items()}
         # deal with the dataframes/series
-        index = ['location', 'scale', 'shape'] + [f'd_location_{d}' for d in range(1, ncov + 1)] + [f'd_scale_{d}' for d
-                                                                                                    in
-                                                                                                    range(1, ncov + 1)]
-        if shape_cov:
-            index += [f'd_shape_{d}' for d in range(1, ncov + 1)]
+
+        index = ['location', 'scale', 'shape']
+        for n in cov_names:
+            index += [f'Dlocation_{n}', f'Dscale_{n}']
+            if shape_cov:
+                index += [f'Dshape_{n}']
         result['par']: pd.Series = pd.Series(result['par'], index=index)
         result['se_theta']: pd.Series = pd.Series(result['se_theta'], index=index)
         result['cov_theta']: pd.DataFrame = pd.DataFrame(result['cov_theta'], index=index, columns=index)
@@ -285,6 +291,7 @@ def gev_fit_new(data_arrays: list[np.ndarray],
 
     if 'use_phi' in kwargs:
         raise NotImplementedError('use_phi not implemented')
+
     L = ~np.isnan(data_arrays[0])  # mask
     r_args = kwargs.copy()
     # deal with things we know how to deal with which we also use in the python code or need to explicitly convert for R.
@@ -295,9 +302,9 @@ def gev_fit_new(data_arrays: list[np.ndarray],
         data_arrays = data_arrays[0:-1]
 
     if initial:
-        r_initial = initial.copy() # don't want to change the original
+        r_initial = initial.copy()  # don't want to change the original
         shape = initial.get('shape')
-        if shape is not None and isinstance(shape, (float,int,np.ndarray)):
+        if shape is not None and isinstance(shape, (float, int, np.ndarray)):
             r_initial['shape'] = -shape
         if shape is not None and isinstance(shape, list):
             r_initial['shape'] = [-v for v in shape]
@@ -308,6 +315,8 @@ def gev_fit_new(data_arrays: list[np.ndarray],
     npts = 3 + 2 * ncov
     if shape_cov:
         npts += ncov
+    if cov_names is None:
+        cov_names = [f'cov{i:d}' for i in range(1, ncov + 1)]
     # shapes of the results. par is the parameter values, se_theta is the standard errors, cov_theta is the covariance matrix
     shapes = dict(par=npts, se_theta=npts, cov_theta=[npts, npts], nllh=[1], AIC=[1], ks=[1])
     # check we have enough data.
@@ -319,11 +328,10 @@ def gev_fit_new(data_arrays: list[np.ndarray],
 
     # generate the data frame
     df = [pd.Series(data_arrays[0][L], name='x')]
-    for indx, cov in enumerate(data_arrays[1:]):
+    for cov, cname in zip(data_arrays[1:], cov_names):
         if np.isnan(cov[L]).any():
             ValueError('Missing values in covariate')
-        name = f"cov{indx:d}"
-        df.append(pd.Series(cov[L]).rename(name))  # remove places where x was nan from cov.
+        df.append(pd.Series(cov[L]).rename(cname))  # remove places where x was nan from cov.
 
     df = pd.DataFrame(df).T
     if len(df.columns) > 1:
@@ -335,7 +343,7 @@ def gev_fit_new(data_arrays: list[np.ndarray],
             r_args['shape.fun'] = cov_expr
     try:
         with (robjects.default_converter + rpandas2ri.converter + numpy2ri.converter).context():
-            fit = r_gev.fevd_sum(x='x', data=df, **r_args) # run the R
+            fit = r_gev.fevd_sum(x='x', data=df, **r_args)  # run the R
     except rpy2.rinterface_lib.embedded.RRuntimeError as e:
         my_logger.warning(f'Error in R code: {e}')
         result = fail_result()
@@ -345,9 +353,10 @@ def gev_fit_new(data_arrays: list[np.ndarray],
     # and then any xxx0 have the 0 removed
     pattern = '^(location|scale|shape)0$'
     par_names = [re.sub(pattern, r'\1', f) for f in par_names]  # const values
-    # and name the covariates d_location_1, d_location_2 etc
-    pattern = r'^(location|scale|shape)(\d+)$'
-    par_names = [re.sub(pattern, r'd_\1_\2', f) for f in par_names]  # covariate values
+    # and name the covariates Dlocation_cname[0], Dlocation_cname[1] etc
+    for indx, cname in enumerate(cov_names):
+        pattern = fr'^(location|scale|shape){indx + 1:d}$'
+        par_names = [re.sub(pattern, rf'D\1_{cname}', f) for f in par_names]  # covariate values
 
     # now to extract the values and convert them to series, dataframes or floats as appropriate
     result = dict()
@@ -385,10 +394,10 @@ def gev_fit_new(data_arrays: list[np.ndarray],
         d_scale = None
         if ncov != 0:  # got some covariance
             # get the covariate values
-            d_location = params.loc[[f'd_location_{d}' for d in range(1, ncov + 1)]]
-            d_scale = params.loc[[f'd_scale_{d}' for d in range(1, ncov + 1)]]
+            d_location = params.loc[[f'Dlocation_{d}' for d in cov_names]]
+            d_scale = params.loc[[f'Dscale_{d}' for d in cov_names]]
             if shape_cov:
-                d_shape = params.loc[[f'd_shape_{d}' for d in range(1, ncov + 1)]]
+                d_shape = params.loc[[f'Dshape_{d}' for d in cov_names]]
 
         shape, location, scale = gen_params(float(params.loc['shape']), float(params.loc['location']),
                                             float(params.loc['scale'])
@@ -412,6 +421,7 @@ def gev_fit_wrapper(*data_arrays,
                     min_values: int = 20,
                     verbose: bool = False,
                     weights: bool = False,
+                    cov_names: typing.Optional[typing.List[str]] = None,
                     initial: typing.Optional[dict[str, float]] = None,
                     **kwargs) -> tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -420,19 +430,18 @@ def gev_fit_wrapper(*data_arrays,
         :returns: the parameter values, the std error, the covariance matrix, the negative log likelihood, the AIC, the ks test p value and names of the parameters.
     """
 
-    result = gev_fit_new(data_arrays, shape_cov, min_values, verbose, weights, initial, **kwargs)
-    names = np.array(result[0].index)
-    result = [np.array(r) for r in result] + [names]
+    result = gev_fit_new(data_arrays, shape_cov=shape_cov, min_values=min_values, verbose=verbose, weights=weights,
+                         initial=initial, cov_names=cov_names, **kwargs)
+    par_names = result[0].index.values
+    result = [np.array(r) for r in result]
+    result += [par_names]
     return tuple(result)
-
-
-
 
 
 def gev_fit_python(
         data: np.ndarray, nmin: int = 10,
         **kwargs
-        ) -> (np.ndarray, np.ndarray):
+) -> (np.ndarray, np.ndarray):
     L = ~np.isnan(data)  # check nan
     if L.sum() <= nmin:  # Not enough data
         fit = np.array([np.nan] * 3)  # return nans
@@ -454,9 +463,9 @@ def xarray_gev_python(
         dim: str = 'time_ensemble',
         file: typing.Optional[pathlib.Path] = None,
         recreate_fit: bool = False,
-        use_dask:bool = False,
+        use_dask: bool = False,
         **kwargs
-        ) -> xarray.Dataset:
+) -> xarray.Dataset:
     """
     Fit a GEV to xarray data using scipy.stats. Less powerful than R. Note this code has not been solidly tested.
     :param name: Name of dataArray
@@ -479,16 +488,16 @@ def xarray_gev_python(
     my_logger.debug('Doing fit')
 
     if use_dask:
-        extra_args=dict(dask='parallelized',
-                        dask_gufunc_kwargs=dict(allow_rechunk=True),
-                        output_sizes=dict(parameter=3, ks=2))
+        extra_args = dict(dask='parallelized',
+                          dask_gufunc_kwargs=dict(allow_rechunk=True),
+                          output_sizes=dict(parameter=3, ks=2))
     else:
         extra_args = {}
     params, ks_result = xarray.apply_ufunc(
         gev_fit_python, ds,
         input_core_dims=[[dim]],
         output_core_dims=[['parameter'], ['ks']],
-        vectorize=True, kwargs=kwargs,**extra_args
+        vectorize=True, kwargs=kwargs, **extra_args
     )
     my_logger.debug('Done fit. Making dataset')
     pnames = ['shape', 'location', 'scale']
@@ -505,15 +514,15 @@ def xarray_gev_python(
 
 def xarray_gev(
         data_array: xarray.DataArray,
-        cov: typing.Optional[typing.List[xarray.DataArray]|xarray.DataArray] = None,
+        cov: typing.Optional[typing.List[xarray.DataArray] | xarray.DataArray] = None,
         shape_cov=False,
         dim: [typing.List[str], str] = 'time_ensemble',
         file=None, recreate_fit: bool = False,
         verbose: bool = False,
         name: typing.Optional[str] = None,
         weights: typing.Optional[xarray.DataArray] = None,
-        extra_attrs:typing.Optional[dict] = None,
-        use_dask:bool = False,
+        extra_attrs: typing.Optional[dict] = None,
+        use_dask: bool = False,
         **kwargs
 ):
     #
@@ -546,7 +555,7 @@ def xarray_gev(
 
     kwargs['shape_cov'] = shape_cov
     kwargs['verbose'] = verbose
-    dim_not_collapsed = set(data_array.dims)-set([dim]) # dimensions which are not collapsed
+    dim_not_collapsed = set(data_array.dims) - set([dim])  # dimensions which are not collapsed
     if cov is None:
         cov = []
     if not isinstance(cov, list):
@@ -559,14 +568,14 @@ def xarray_gev(
         dim = [dim]
     input_core_dims = [dim] * (1 + ncov)
 
-    output_core_dims = [['parameter']] * 2 + [['parameter', 'parameter2'], [], [], [],['parameter']]
+    output_core_dims = [['parameter']] * 2 + [['parameter', 'parameter2'], [], [], [], ['parameter']]
     my_logger.debug('Setting up GEV args')
-    gev_args = [data_array] + [c.broadcast_like(data_array) for c in cov] # broadcast covariates to data_array
+    gev_args = [data_array] + [c.broadcast_like(data_array) for c in cov]  # broadcast covariates to data_array
     cov_names = [c.name for c in cov]
     if use_dask:
-        extra_args=dict(dask='parallelized',
-                        dask_gufunc_kwargs=dict(allow_rechunk=True,
-                        output_sizes=dict(parameter=3+2*ncov, parameter2=3+2*ncov)))
+        extra_args = dict(dask='parallelized',
+                          dask_gufunc_kwargs=dict(allow_rechunk=True,
+                                                  output_sizes=dict(parameter=3 + 2 * ncov, parameter2=3 + 2 * ncov)))
         my_logger.debug('Using dask')
     else:
         extra_args = {}
@@ -577,20 +586,18 @@ def xarray_gev(
         my_logger.debug('Using weights')
 
     my_logger.debug('Doing fit')
-
-    params, std_err, cov_param, nll, AIC, ks,param_names = xarray.apply_ufunc(gev_fit_wrapper, *gev_args,
-                                                                  input_core_dims=input_core_dims,
-                                                                  output_core_dims=output_core_dims,
-                                                                  vectorize=True, kwargs=kwargs,**extra_args
-                                                                  )
+    kwargs.update(cov_names=cov_names) # pass in the names of the covariances.
+    params, std_err, cov_param, nll, AIC, ks, param_names = xarray.apply_ufunc(gev_fit_wrapper, *gev_args,
+                                                                               input_core_dims=input_core_dims,
+                                                                               output_core_dims=output_core_dims,
+                                                                               vectorize=True, kwargs=kwargs,
+                                                                               **extra_args
+                                                                               )
     my_logger.debug('Done fit. Making dataset')
-    # fix param_names  convert d_XXX_1 to EXXX_name where name is the name of the covariate.
+    # extract the names of the parameters. Mild pain as they are returned from the scaler fit function.
     param_names = param_names.stack(fdim=dim_not_collapsed).isel(fdim=0).values.tolist()
-    for indx, name in enumerate(cov_names):
-        param_names = [re.sub(rf'^d_(\w+)_\d+$', rf'D\1_{name}', p) for p in param_names]
 
     # name variables and then combine into one dataset.
-
     params = params.rename("Parameters")
     std_err = std_err.rename("StdErr")
     cov_param = cov_param.rename("Cov")
@@ -626,7 +633,6 @@ def fn_isf(c, loc, scale, p: typing.Optional[np.ndarray] = None, dist=scipy.stat
     # handle single p value.
     # if len(p) == 1:
     #    p=p.reshape(1,-1)
-
 
     x = fd.isf(np.broadcast_to(p, shape))
     # x=fd.isf(p)
