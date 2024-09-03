@@ -269,7 +269,7 @@ def gev_fit_new(data_arrays: typing.Union[tuple[np.ndarray], list[np.ndarray]],
                     the ks test p value as a float
         """
 
-    def fail_result(cov_names: list[str], shape_cov: bool = False) -> dict:
+    def fail_result(shapes:dict[str,list], cov_names: list[str], shape_cov: bool = False) -> dict:
         """
         Generate a failure result
         :return: dict of results all with nan values
@@ -297,8 +297,13 @@ def gev_fit_new(data_arrays: typing.Union[tuple[np.ndarray], list[np.ndarray]],
     # deal with things we know how to deal with which we also use in the python code or need to explicitly convert for R.
     r_args['verbose'] = verbose
     if weights:
+        # check weights has the right size and if not complain.
+        if len(data_arrays) == 1:
+            raise ValueError('Weights specified but no weights provided')
+        if data_arrays[-1].shape != data_arrays[0].shape:
+            raise ValueError('Weights have wrong shape')
         r_args['weights'] = robjects.vectors.FloatVector(
-            data_arrays[-1])  # extract weights and make it an r floatVector
+            data_arrays[-1][L])  # extract weights and make it an r floatVector
         data_arrays = data_arrays[0:-1]
 
     if initial:
@@ -323,7 +328,7 @@ def gev_fit_new(data_arrays: typing.Union[tuple[np.ndarray], list[np.ndarray]],
     sumOK = L.sum()
     if sumOK < min_values:
         my_logger.warning(f'Not enough data for fit. Have {sumOK} need {min_values}')
-        result = fail_result()
+        result = fail_result(shapes,cov_names,shape_cov=shape_cov)
         return tuple(result.values())
 
     # generate the data frame
@@ -346,7 +351,7 @@ def gev_fit_new(data_arrays: typing.Union[tuple[np.ndarray], list[np.ndarray]],
             fit = r_gev.fevd_sum(x='x', data=df, **r_args)  # run the R
     except rpy2.rinterface_lib.embedded.RRuntimeError as e:
         my_logger.warning(f'Error in R code: {e}')
-        result = fail_result()
+        result = fail_result(shapes,cov_names,shape_cov=shape_cov)
         return tuple(result.values())
     # annoyingly the names that R generates change if covariates are used so  need to rename them.
     par_names = [f.replace('mu', 'location', 1).replace('sigma', 'scale', 1) for f in fit['par.names']]
@@ -423,13 +428,18 @@ def gev_fit_wrapper(*data_arrays,
                     weights: bool = False,
                     cov_names: typing.Optional[typing.List[str]] = None,
                     initial: typing.Optional[dict[str, float]] = None,
+                    initial_ds: bool =False,
                     **kwargs) -> tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
         Calls gev_fit_new and converts the results to numpy arrays. See gev_fit_new for details.
         :returns: the parameter values, the std error, the covariance matrix, the negative log likelihood, the AIC, the ks test p value and names of the parameters.
     """
-
+    print(len(data_arrays))
+    print(kwargs)
+    breakpoint()
+    if initial_ds:
+        breakpoint()
     result = gev_fit_new(data_arrays, shape_cov=shape_cov, min_values=min_values, verbose=verbose, weights=weights,
                          initial=initial, cov_names=cov_names, **kwargs)
     par_names = result[0].index.values
@@ -521,6 +531,7 @@ def xarray_gev(
         verbose: bool = False,
         name: typing.Optional[str] = None,
         weights: typing.Optional[xarray.DataArray] = None,
+        initial: typing.Optional[xarray.Dataset] = None,
         extra_attrs: typing.Optional[dict] = None,
         use_dask: bool = False,
         **kwargs
@@ -584,7 +595,12 @@ def xarray_gev(
         input_core_dims += [dim]
         kwargs.update(weights=True)
         my_logger.debug('Using weights')
-
+    if initial is not None:
+        gev_args += [initial]
+        input_core_dims += [dim]
+        kwargs.update(initial_ds=True)
+        extra_args.update(on_missing_core_dim='copy')
+        my_logger.debug('Using initial values')
     my_logger.debug('Doing fit')
     kwargs.update(cov_names=cov_names) # pass in the names of the covariances.
     params, std_err, cov_param, nll, AIC, ks, param_names = xarray.apply_ufunc(gev_fit_wrapper, *gev_args,
