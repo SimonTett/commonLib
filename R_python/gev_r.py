@@ -574,7 +574,7 @@ def xarray_gev(
     :param recreate_fit -- if True even if file exists compute fit.
     :param verbose -- be verbose if True
     :param name: Name of the fit. Stored in result attributes under name.
-    :param use_dask: If True use dask to do the fitting.
+    :param use_dask: If True use dask to do the fitting. Problematic so not really recommended.
     :param kwargs: any kwargs passed through to the fitting function
     :return: a dataset containing:
         Parameters -- the parameters of the fit; location, location wrt cov, scale, scale wrt cov, shape, shape wrt cov
@@ -609,9 +609,13 @@ def xarray_gev(
     gev_args = [data_array] + [c.broadcast_like(data_array) for c in cov]  # broadcast covariates to data_array
 
     if use_dask:
+        if shape_cov:
+            npars= 3 # shape, location and scale all change
+        else:
+            npars = 2 # only location and scale change
         extra_args = dict(dask='parallelized',
                           dask_gufunc_kwargs=dict(allow_rechunk=True,
-                                                  output_sizes=dict(parameter=3 + 2 * ncov, parameter2=3 + 2 * ncov)))
+                                                  output_sizes=dict(parameter=3 + npars * ncov, parameter2=3 + npars * ncov)))
         my_logger.debug('Using dask')
     else:
         extra_args = {}
