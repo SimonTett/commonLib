@@ -1,7 +1,7 @@
 # scratch code to test if R stuff if working.
 # get the r-packages installed.
 import xarray
-import CPMlib
+#import CPMlib
 from R_python import gev_r
 import numpy as np
 import pandas as pd
