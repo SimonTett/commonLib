@@ -78,7 +78,7 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
     mo_cet_root = 'https://www.metoffice.gov.uk/hadobs/hadcet'
     mo_cet_root = 'https://www.metoffice.gov.uk/hadobs/hadcet/data/'
     # ALL but seasonal likely need updating.
-    urls = dict(dailymean='cetdl1772on.dat', monthlymean='meantemp_monthly_totals.txt',
+    urls = dict(dailymean='meantemp_daily_totals.txt', monthlymean='meantemp_monthly_totals.txt',
                 seasonalmean='meantemp_seasonal_totals.txt', dailymin='cetmindly1878on_urbadj4.dat',
                 monthlymin='cetminmly1878on_urbadj4.dat', seasonalmin='sn_HadCET_min.txt',
                 dailymax='cetmaxdly1878on_urbadj4.dat', monthlymax='cetmaxmly1878on_urbadj4.dat',
@@ -86,7 +86,7 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
 
     nskip = dict(monthly=4, seasonal=9, daily=0)
     month_lookups = dict(JAN=1, FEB=2, MAR=3, APR=4, MAY=5, JUN=6, JUL=7, AUG=8, SEP=9, OCT=10, NOV=11, DEC=12, DJF=1,
-                         MAM=4, JJA=7, SON=10, Win=1, Spr=4, Sum=7, Aut=10
+                         MAM=4, JJA=7, SON=10, WIN=1, SPR=4, SUM=7, AUT=10
                          )  # month
 
     if file is None:
@@ -103,19 +103,26 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
         rdata = io.StringIO(r.text)
         data = pd.read_csv(rdata, skiprows=nskip.get(mean, 0), header=[0], sep=r'\s+', na_values=[-99.9])
         # need to use cftime to make time-coords... so all a bit of a pain! and will be doubly so for daily data..
-        dates = []
-        values = []
-        for c in data.columns:
-            month = month_lookups.get(c.upper())
-            if month is None:
-                continue
-            if temp_type == 'daily':
-                raise Exception(f"Can't handle {temp_type} data")
-            else:
-                dates.extend([cftime.datetime(yr, month, 1, calendar='proleptic_gregorian') for yr in data.Year])
-                values.extend(data.loc[:, c].values)
+        if mean != 'daily':
+            dates = []
+            values = []
+            for c in data.columns:
+                month = month_lookups.get(c.upper())
+                if month is None:
+                    continue
+                if temp_type == 'daily':
+                    raise Exception(f"Can't handle {temp_type} data")
+                else:
+                    dates.extend([cftime.datetime(yr, month, 1, calendar='proleptic_gregorian') for yr in data.Year])
+                    values.extend(data.loc[:, c].values)
+        else:
+            # Function to convert string to cftime datetime. Thanks chatgpt co-pilot
+            def to_cftime(date_str):
+                return cftime.datetime.strptime(date_str, '%Y-%m-%d', calendar='gregorian')
+            dates = data.Date.apply(to_cftime)
+            values = data.Value
+
         ts = xarray.DataArray(values, coords=dict(time=dates)).rename(f'CET{mean}{temp_type}').sortby('time')
-        breakpoint()
         pathlib.Path(direct).mkdir(parents=True, exist_ok=True)  # make (if needed directory to put the data
         ts.to_netcdf(path)  # write out the data.
     else:
