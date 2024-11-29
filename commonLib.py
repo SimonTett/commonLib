@@ -79,10 +79,10 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
     mo_cet_root = 'https://www.metoffice.gov.uk/hadobs/hadcet/data/'
     # ALL but seasonal likely need updating.
     urls = dict(dailymean='meantemp_daily_totals.txt', monthlymean='meantemp_monthly_totals.txt',
-                seasonalmean='meantemp_seasonal_totals.txt', dailymin='cetmindly1878on_urbadj4.dat',
-                monthlymin='cetminmly1878on_urbadj4.dat', seasonalmin='sn_HadCET_min.txt',
-                dailymax='cetmaxdly1878on_urbadj4.dat', monthlymax='cetmaxmly1878on_urbadj4.dat',
-                seasonalmax='sn_HadCET_max.txt', )
+                seasonalmean='meantemp_seasonal_totals.txt', dailymin='mintemp_daily_totals.txt',
+                monthlymin='mintemp_monthly_totals.txt', seasonalmin='mintemp_seasonal_totals.txt',
+                dailymax='maxtemp_daily_totals.txt', monthlymax='maxtemp_monthly_totals.txt',
+                seasonalmax='maxtemp_seasonal_totals.txt', )
 
     nskip = dict(monthly=4, seasonal=9, daily=0)
     month_lookups = dict(JAN=1, FEB=2, MAR=3, APR=4, MAY=5, JUN=6, JUL=7, AUG=8, SEP=9, OCT=10, NOV=11, DEC=12, DJF=1,
@@ -110,8 +110,6 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
                 month = month_lookups.get(c.upper())
                 if month is None:
                     continue
-                if temp_type == 'daily':
-                    raise Exception(f"Can't handle {temp_type} data")
                 else:
                     dates.extend([cftime.datetime(yr, month, 1, calendar='proleptic_gregorian') for yr in data.Year])
                     values.extend(data.loc[:, c].values)

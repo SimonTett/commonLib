@@ -6,3 +6,7 @@ xarray
 scipy
 pandas
 numexpr
+ipython
+cftime
+nc_time_axis
+requests
