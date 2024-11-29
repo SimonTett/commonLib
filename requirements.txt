@@ -1,0 +1,12 @@
+# requirements for commonlib code.
+# needed for R code
+rpy2~=3.5.11
+numpy~=1.26.2
+xarray
+scipy
+pandas
+numexpr
+ipython
+cftime
+nc_time_axis
+requests
