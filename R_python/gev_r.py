@@ -641,7 +641,10 @@ def xarray_gev(
                                                                                )
     my_logger.debug('Done fit. Making dataset')
     # extract the names of the parameters. Mild pain as they are returned from the scaler fit function.
-    param_names = param_names.stack(fdim=dim_not_collapsed).isel(fdim=0).values.tolist()
+    if len(dim_not_collapsed) > 0:
+        param_names = param_names.stack(fdim=dim_not_collapsed).isel(fdim=0)
+
+    param_names = param_names.values.tolist()
 
     # name variables and then combine into one dataset.
     params = params.rename("Parameters")
