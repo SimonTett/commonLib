@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import typing
 import sys
 import logging
+import os
+import dask # for dask.distributed.Client
 
 my_logger = logging.getLogger(__name__)
 
@@ -316,3 +318,22 @@ def create_time(
     :return: formatted time of creation for file
     """
     return datetime.datetime.fromtimestamp(path.stat().st_ctime).strftime(fmt)
+
+
+def dask_client() -> 'dask.distributed.Client':
+    """
+    Start or connect to an existing dask client. Address for server stored in $DASK_SCHEDULER_ADDRESS
+    :return: dask.distributed.Client
+    """
+    import dask.distributed
+    try:
+        dask_sa = os.environ['DASK_SCHEDULER_ADDRESS']
+        my_logger.warning(f"already got client at {dask_sa}")
+        client = dask.distributed.get_client(dask_sa, timeout='2s')  # fails. FIX if ever want client
+    except KeyError:
+        client = dask.distributed.Client(timeout='2s')
+        dask_sa = client.scheduler_info()['address']  # need to dig deep into dask doc to get this!
+        os.environ['DASK_SCHEDULER_ADDRESS'] = dask_sa
+        my_logger.warning(f"Starting new Dask client on {dask_sa}. Available in $DASK_SCHEDULER_ADDRESS ")
+    my_logger.warning(f"Dashboard for client at {client.dashboard_link}")
+    return client

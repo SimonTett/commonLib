@@ -1,12 +1,14 @@
 # mini python script to test if can make gev fit work with dask.
 from R_python import gev_r
-import ausLib
+import commonLib
 import xarray
 import multiprocessing
+import logging
+my_logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     multiprocessing.freeze_support()  # needed for obscure reasons I don't get!
-    my_logger=ausLib.setup_log(1)
-    c=ausLib.dask_client() # have dask running.
+    commonLib.init_log(my_logger,'DEBUG')
+    c=commonLib.dask_client() # have dask running.
     ds=xarray.tutorial.open_dataset("air_temperature",chunks=dict(time=100))
     my_logger.info('Loading dataset')
     air = ds.air.load()

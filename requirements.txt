@@ -10,3 +10,8 @@ ipython
 cftime
 nc_time_axis
 requests
+# needed for GSHSS_WDBII
+fiona
+cartopy
+# and for testing if dask and r work -- they don't :-
+dask[distributed]
