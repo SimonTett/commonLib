@@ -8,6 +8,7 @@ from scipy import stats
 import numpy as np
 import pandas.testing as pd_tests
 import xarray.testing as x_tests
+import numpy.testing as np_tests
 class test_R_gev(unittest.TestCase):
     def test_gev_fit_new(self):
         data = stats.genextreme.rvs(0.1, loc=10, scale=5, size=10000)
@@ -26,12 +27,33 @@ class test_R_gev(unittest.TestCase):
         self.assertTrue(np.any(pars2 != pars)) # values should be different
         self.assertTrue(np.isnan(ks2)) # ks should be nan
         # test with covariates. Will increase the mean with time
-        time  = np.arange(0,len(data))/100.
-        data2 = stats.genextreme.rvs(0.1, loc=10, scale=5, size=10000) *(1+time*0.1) # expect to get a change in location and scale
+        ntime =10000
+        time  = np.arange(0,ntime)/100.
+        data2 = stats.genextreme.rvs(0.1, loc=10, scale=5, size=ntime) *(1+time*0.1) # expect to get a change in location and scale
         expected = pd.Series([0.1, 10, 5,1,0.5],index=['shape','location','scale','Dlocation_time','Dscale_time']).rename('par')
         df2 = pd.DataFrame(np.stack([data2,time],axis=1),columns=['x','time'])
         pars3,se3,cov3,nll3,aic3,ks3 = gev_r.gev_fit_new(df2, verbose=True,initial=dict(location=[15,0.9],scale=[6.0,0.4],shape=0.01))
         pd_tests.assert_series_equal(pars3.round(1), expected, rtol=1e-1, check_like=True)
+
+    def test_gev_fit_wrapper(self):
+        # test gev_fit_wrapper
+        data = stats.genextreme.rvs(0.1, loc=10, scale=5, size=10000)
+        expected = np.array([10, 5,0.1])
+        results = gev_r.gev_fit_wrapper(data, verbose=False)
+        np_tests.assert_allclose(results[0],expected,rtol=1e-1)
+        np_tests.assert_equal(results[-1],np.array(['location','scale','shape']))
+        # with a covariate
+        ntime = 10000
+        time = np.arange(0, ntime) / 100.
+        data2:np.ndarray = stats.genextreme.rvs(0.1, loc=100, scale=5, size=ntime) * (
+                    1 + time * 0.01)  # expect to get a change in location and scale
+        expected = np.array([100., 1.0,5.,0.05, 0.1]).astype(float)
+        results = gev_r.gev_fit_wrapper(data2, time,cov_names=['time'], verbose=False)
+        np_tests.assert_allclose(results[0], expected, rtol=2e-1)
+        np_tests.assert_equal(results[-1],np.array(['location','Dlocation_time','scale','Dscale_time','shape']))
+
+
+
 
     def test_gev_xarray(self):
         # test case with xarray. Will have a two-dimensional array with time and space

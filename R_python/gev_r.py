@@ -20,6 +20,7 @@ from rpy2.robjects import numpy2ri
 import re
 import importlib.resources
 import scipy.stats
+__version__ = "0.0.0-2025.03.18" # still in development so having secondary date.
 
 utils = rpackages.importr('utils')
 utils.chooseCRANmirror(ind=1)
@@ -426,7 +427,7 @@ def gev_fit_wrapper(*data_arrays:tuple[np.ndarray],
                     **kwargs) -> tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-        If inital is set then data_arrays[-1] is the initial values for the fit.
+        If initial is set then data_arrays[-1] is the initial values for the fit.
         The names of the parameters are in kwargs['initial_names'] which must be present.
         Sigh -- the joys of apply_unfuc.
         Calls gev_fit_new and converts the results to numpy arrays. See gev_fit_new for other  details.
@@ -653,6 +654,8 @@ def xarray_gev(
     nll = nll.rename('nll').squeeze()
     AIC = AIC.rename('AIC').squeeze()
     ks = ks.rename('ks').squeeze()
+    #TODO -- Lingying thinks there is a bug where the Dlocation and Dscale are *probably* reversed.
+    # And maybe location & scale when covariate provided
     data_array = xarray.Dataset(dict(Parameters=params, StdErr=std_err, Cov=cov_param, nll=nll, AIC=AIC, KS=ks)
                                 ).assign_coords(
         parameter=param_names, parameter2=param_names)
