@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import typing
 import sys
 import logging
+import os
+import dask # for dask.distributed.Client
 
 my_logger = logging.getLogger(__name__)
 
@@ -78,15 +80,15 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
     mo_cet_root = 'https://www.metoffice.gov.uk/hadobs/hadcet'
     mo_cet_root = 'https://www.metoffice.gov.uk/hadobs/hadcet/data/'
     # ALL but seasonal likely need updating.
-    urls = dict(dailymean='cetdl1772on.dat', monthlymean='meantemp_monthly_totals.txt',
-                seasonalmean='meantemp_seasonal_totals.txt', dailymin='cetmindly1878on_urbadj4.dat',
-                monthlymin='cetminmly1878on_urbadj4.dat', seasonalmin='sn_HadCET_min.txt',
-                dailymax='cetmaxdly1878on_urbadj4.dat', monthlymax='cetmaxmly1878on_urbadj4.dat',
-                seasonalmax='sn_HadCET_max.txt', )
+    urls = dict(dailymean='meantemp_daily_totals.txt', monthlymean='meantemp_monthly_totals.txt',
+                seasonalmean='meantemp_seasonal_totals.txt', dailymin='mintemp_daily_totals.txt',
+                monthlymin='mintemp_monthly_totals.txt', seasonalmin='mintemp_seasonal_totals.txt',
+                dailymax='maxtemp_daily_totals.txt', monthlymax='maxtemp_monthly_totals.txt',
+                seasonalmax='maxtemp_seasonal_totals.txt', )
 
     nskip = dict(monthly=4, seasonal=9, daily=0)
     month_lookups = dict(JAN=1, FEB=2, MAR=3, APR=4, MAY=5, JUN=6, JUL=7, AUG=8, SEP=9, OCT=10, NOV=11, DEC=12, DJF=1,
-                         MAM=4, JJA=7, SON=10, Win=1, Spr=4, Sum=7, Aut=10
+                         MAM=4, JJA=7, SON=10, WIN=1, SPR=4, SUM=7, AUT=10
                          )  # month
 
     if file is None:
@@ -103,19 +105,24 @@ def read_cet(file=None, retrieve=False, direct='data', mean='seasonal', temp_typ
         rdata = io.StringIO(r.text)
         data = pd.read_csv(rdata, skiprows=nskip.get(mean, 0), header=[0], sep=r'\s+', na_values=[-99.9])
         # need to use cftime to make time-coords... so all a bit of a pain! and will be doubly so for daily data..
-        dates = []
-        values = []
-        for c in data.columns:
-            month = month_lookups.get(c.upper())
-            if month is None:
-                continue
-            if temp_type == 'daily':
-                raise Exception(f"Can't handle {temp_type} data")
-            else:
-                dates.extend([cftime.datetime(yr, month, 1, calendar='proleptic_gregorian') for yr in data.Year])
-                values.extend(data.loc[:, c].values)
+        if mean != 'daily':
+            dates = []
+            values = []
+            for c in data.columns:
+                month = month_lookups.get(c.upper())
+                if month is None:
+                    continue
+                else:
+                    dates.extend([cftime.datetime(yr, month, 1, calendar='proleptic_gregorian') for yr in data.Year])
+                    values.extend(data.loc[:, c].values)
+        else:
+            # Function to convert string to cftime datetime. Thanks chatgpt co-pilot
+            def to_cftime(date_str):
+                return cftime.datetime.strptime(date_str, '%Y-%m-%d', calendar='gregorian')
+            dates = data.Date.apply(to_cftime)
+            values = data.Value
+
         ts = xarray.DataArray(values, coords=dict(time=dates)).rename(f'CET{mean}{temp_type}').sortby('time')
-        breakpoint()
         pathlib.Path(direct).mkdir(parents=True, exist_ok=True)  # make (if needed directory to put the data
         ts.to_netcdf(path)  # write out the data.
     else:
@@ -311,3 +318,22 @@ def create_time(
     :return: formatted time of creation for file
     """
     return datetime.datetime.fromtimestamp(path.stat().st_ctime).strftime(fmt)
+
+
+def dask_client() -> 'dask.distributed.Client':
+    """
+    Start or connect to an existing dask client. Address for server stored in $DASK_SCHEDULER_ADDRESS
+    :return: dask.distributed.Client
+    """
+    import dask.distributed
+    try:
+        dask_sa = os.environ['DASK_SCHEDULER_ADDRESS']
+        my_logger.warning(f"already got client at {dask_sa}")
+        client = dask.distributed.get_client(dask_sa, timeout='2s')  # fails. FIX if ever want client
+    except KeyError:
+        client = dask.distributed.Client(timeout='2s')
+        dask_sa = client.scheduler_info()['address']  # need to dig deep into dask doc to get this!
+        os.environ['DASK_SCHEDULER_ADDRESS'] = dask_sa
+        my_logger.warning(f"Starting new Dask client on {dask_sa}. Available in $DASK_SCHEDULER_ADDRESS ")
+    my_logger.warning(f"Dashboard for client at {client.dashboard_link}")
+    return client
