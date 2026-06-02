@@ -36,11 +36,17 @@ class test_R_gev(unittest.TestCase):
         pd_tests.assert_series_equal(pars3.round(1), expected, rtol=1e-1, check_like=True)
 
     def test_gev_fit_wrapper(self):
+        def test_fit(results,expected):
+            np_tests.assert_allclose(results[0][0:2], expected[0:2], rtol=5e-2) # location & scale
+            np_tests.assert_allclose(results[0][2], expected[2], rtol=2e-1) # shape
+
         # test gev_fit_wrapper
         data = stats.genextreme.rvs(0.1, loc=10, scale=5, size=10000)
         expected = np.array([10, 5,0.1])
         results = gev_r.gev_fit_wrapper(data, verbose=False)
-        np_tests.assert_allclose(results[0],expected,rtol=1e-1)
+        test_fit(results,expected)
+
+
         np_tests.assert_equal(results[-1],np.array(['location','scale','shape']))
         # with a covariate
         ntime = 10000

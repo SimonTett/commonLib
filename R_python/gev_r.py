@@ -552,8 +552,9 @@ def xarray_gev(
         data_array: xarray.DataArray,
         cov: typing.Optional[typing.Union[typing.List[xarray.DataArray],xarray.DataArray]] = None,
         shape_cov=False,
-        dim: [typing.List[str], str] = 'time_ensemble',
-        file=None, recreate_fit: bool = False,
+        dim: typing.Union[typing.List[str], str] = 'time',
+        file=None,
+        recreate_fit: bool = False,
         verbose: bool = False,
         name: typing.Optional[str] = None,
         weights: typing.Optional[xarray.DataArray] = None,
@@ -561,7 +562,7 @@ def xarray_gev(
         extra_attrs: typing.Optional[dict] = None,
         use_dask: bool = False,
         **kwargs
-):
+) -> xarray.Dataset:
     #
     """
     Fit a GEV to xarray data using R.
@@ -570,8 +571,8 @@ def xarray_gev(
     :param cov: covariate (If None not used) --a list of dataarrays or None. Will be broadcast to data_array.
     :param shape_cov: If True then allow the shape to vary with the covariate.
     :param weights: Weights for each sample. If not specified, no weighting will be done.
-    :param dim: The dimension(s) over which to collapse.
-    :param file -- if defined save fit to this file. If file exists then read data from it and so not actually do fit.
+    :param dim: The dimension(s) over which to collapse. Default is time.
+    :param file -- if defined save fit to this file. If file exists then read data from it and so no fit is done.
     :param recreate_fit -- if True even if file exists compute fit.
     :param verbose -- be verbose if True
     :param name: Name of the fit. Stored in result attributes under name.
@@ -580,9 +581,10 @@ def xarray_gev(
     :return: a dataset containing:
         Parameters -- the parameters of the fit; location, location wrt cov, scale, scale wrt cov, shape, shape wrt cov
         StdErr -- the standard error of the fit -- same parameters as Parameters
+        Cov -- the covariance matrix of the fit -- same parameters as Parameters
         nll -- negative log likelihood of the fit -- measure of the quality of the fit
-        AIC -- aitkin information criteria.
-        ks -- KS test result
+        AIC -- Akaike information criteria.
+        KS -- KS test result
     """
     if (file is not None) and file.exists() and (
             not recreate_fit):  # got a file specified, it exists and we are not recreating fit
@@ -592,7 +594,11 @@ def xarray_gev(
 
     kwargs['shape_cov'] = shape_cov
     kwargs['verbose'] = verbose
-    dim_not_collapsed = set(data_array.dims) - set([dim])  # dimensions which are not collapsed
+    if isinstance(dim, str):
+        dim = [dim]
+    if len(dim) >1:
+        raise ValueError('Only one dimension can be collapsed. Stack your data')
+    dim_not_collapsed = set(data_array.dims) - set(dim)  # dimensions which are not collapsed
     if cov is None:
         cov = []
     if not isinstance(cov, list):
@@ -601,8 +607,7 @@ def xarray_gev(
     cov_names = [c.name for c in cov]
 
     ncov = len(cov)
-    if isinstance(dim, str):
-        dim = [dim]
+
     input_core_dims = [dim] * (1 + ncov)
 
     output_core_dims = [['parameter']] * 2 + [['parameter', 'parameter2'], [], [], [], ['parameter']]
@@ -634,6 +639,7 @@ def xarray_gev(
 
     my_logger.debug('Doing fit')
     kwargs.update(cov_names=cov_names) # pass in the names of the covariances.
+
     params, std_err, cov_param, nll, AIC, ks, param_names = xarray.apply_ufunc(gev_fit_wrapper, *gev_args,
                                                                                input_core_dims=input_core_dims,
                                                                                output_core_dims=output_core_dims,
